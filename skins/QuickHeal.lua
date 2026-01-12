@@ -143,6 +143,8 @@ pfUI:RegisterSkin("QuickHeal", "vanilla", function ()
         QuickHealConfig_PetPrioritySlider,
         QuickHealDownrank_Slider_NH,
         QuickHealDownrank_Slider_FH,
+        QuickHealMinrank_Slider_NH,
+        QuickHealMinrank_Slider_FH,
       }
       for _, slider in pairs(sliders) do
         SkinSlider(slider)
