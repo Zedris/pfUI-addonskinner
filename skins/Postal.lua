@@ -3,74 +3,133 @@ pfUI.addonskinner:RegisterSkin("Postal", function()
 local penv = pfUI:GetEnvironment()
 local HookAddonOrVariable, StripTextures, SkinButton, SkinCheckbox, CreateBackdrop, CreateBackdropShadow =
 penv.HookAddonOrVariable, penv.StripTextures, penv.SkinButton, penv.SkinCheckbox, penv.CreateBackdrop, penv.CreateBackdropShadow
+local GetStringColor = pfUI.api.GetStringColor
+
+local function GetLinkColor(link)
+  if not link then return end
+  local color = string.match(link, "|c(%x%x%x%x%x%x%x%x)")
+  if not color then return end
+  local r = tonumber(string.sub(color, 3, 4), 16) / 255
+  local g = tonumber(string.sub(color, 5, 6), 16) / 255
+  local b = tonumber(string.sub(color, 7, 8), 16) / 255
+  return r, g, b
+end
+
+local function SetQualityBorder(btn, link, hasItem)
+  if not btn then return end
+  local target = btn.backdrop
+  if not target or not target.SetBackdropBorderColor then target = btn end
+  if not target or not target.SetBackdropBorderColor then return end
+
+  local quality = nil
+  if link then
+    local _, _, q = GetItemInfo(link)
+    if q then quality = q end
+  end
+
+  local r, g, b = nil, nil, nil
+  if quality and quality > 0 then
+    r, g, b = GetItemQualityColor(quality)
+  else
+    r, g, b = GetLinkColor(link)
+  end
+
+  if r and g and b then
+    target:SetBackdropBorderColor(r, g, b, 1)
+    btn.rr, btn.rg, btn.rb, btn.ra = r, g, b, 1
+    btn.cr, btn.cg, btn.cb, btn.ca = r, g, b, 1
+  elseif hasItem then
+    target:SetBackdropBorderColor(1, 1, 1, 1)
+    btn.rr, btn.rg, btn.rb, btn.ra = 1, 1, 1, 1
+    btn.cr, btn.cg, btn.cb, btn.ca = 1, 1, 1, 1
+  else
+    local br, bg, bb, ba = GetStringColor(pfUI_config.appearance.border.color)
+    target:SetBackdropBorderColor(br, bg, bb, ba)
+    btn.rr, btn.rg, btn.rb, btn.ra = br, bg, bb, ba
+    btn.cr, btn.cg, btn.cb, btn.ca = br, bg, bb, ba
+  end
+end
+
+local function SkinMailItemButtons()
+  local max = INBOXITEMS_TO_DISPLAY or 7
+  local page = InboxFrame and InboxFrame.pageNum or 1
+  if page < 1 then page = 1 end
+
+  for i = 1, max do
+    local btn = _G["MailItem" .. i .. "Button"]
+    if btn then
+      local index = ((page - 1) * max) + i
+      local hasItem = false
+      if GetInboxHeaderInfo then
+        local _, _, _, _, _, _, _, item = GetInboxHeaderInfo(index)
+        hasItem = item and true or false
+      end
+      local link = nil
+
+      if GetInboxItemLink then
+        link = GetInboxItemLink(index)
+      else
+        local name = GetInboxItem(index)
+        if name then link = pfUI.api.GetItemLinkByName(name) end
+      end
+
+      SetQualityBorder(btn, link, hasItem)
+      btn.locked = true
+    end
+  end
+end
+
+local function UpdateOpenMailButton(index)
+  if not OpenMailPackageButton then return end
+  local link = nil
+  if index and GetInboxItemLink then
+    link = GetInboxItemLink(index)
+  end
+  if not link and index then
+    local name = GetInboxItem(index)
+    if name then link = pfUI.api.GetItemLinkByName(name) end
+  end
+  SetQualityBorder(OpenMailPackageButton, link, link and true or false)
+  OpenMailPackageButton.locked = true
+end
 local function SkinPostalAttachments()
-  local function safeExec(fn) pcall(fn) end
   for i = 1, 200 do
     local btn = _G["PostalAttachment" .. i]
     if not btn then break end
 
     if not btn._pfSkinned then
       StripTextures(btn, true)
-      for _, r in ipairs({btn:GetRegions()}) do if r and r.SetTexture then r:Hide() end end
-      SkinButton(btn)
-      safeExec(function() btn.backdrop:SetFrameLevel(btn:GetFrameLevel() - 1) end)
-
-      -- skin the button and let pfUI crop its icon region
-      local icon = btn:GetNormalTexture()
-      SkinButton(btn, nil, nil, nil, icon)
-      safeExec(function() btn.backdrop:SetFrameLevel(btn:GetFrameLevel() - 1) end)
-
-      -- ensure Postal's calls to SetNormalTexture get cropped by pfUI
+      CreateBackdrop(btn, nil, nil, .75)
+      if btn.SetHighlightTexture then btn:SetHighlightTexture("") end
       local origSetNormal = btn.SetNormalTexture
       btn.SetNormalTexture = function(self, tex)
         if origSetNormal then origSetNormal(self, tex) end
-        local iconRegion = self:GetNormalTexture()
-        if iconRegion and iconRegion.SetTexCoord then
-          safeExec(function() pfUI.api.HandleIcon(self, iconRegion) end)
-          -- enforce a slightly larger crop to hide baked-in borders (attempted, safe)
-          safeExec(function() iconRegion:SetTexCoord(.08, .92, .08, .92) end)
-          safeExec(function() iconRegion:SetPoint("TOPLEFT", self, "TOPLEFT", 3, -3) end)
-          safeExec(function() iconRegion:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", -3, 3) end)
+        local icon = self:GetNormalTexture()
+        if icon and icon.SetTexCoord then
+          pfUI.api.HandleIcon(self, icon)
         end
       end
-
-      -- if a texture already exists (Postal may have set it earlier), force the override to run now
-      do
-        local cur = btn:GetNormalTexture()
-        if cur and cur.GetTexture then
-          local t = cur:GetTexture()
-          if t and btn.SetNormalTexture then
-            btn:SetNormalTexture(t)
-          end
-        end
+      local cur = btn:GetNormalTexture()
+      if cur and cur.GetTexture then
+        btn:SetNormalTexture(cur:GetTexture())
       end
-
-      -- style the stack count FontString (bottom-right number)
-      do
-        local count = _G[btn:GetName() .. 'Count']
-        if count and count.SetFont then
-          count:SetFont(pfUI.font_default, 11, "THICKOUTLINE")
-          count:SetTextColor(1,1,1)
-        end
+      local count = _G[btn:GetName() .. 'Count']
+      if count and count.SetFont then
+        count:SetFont(pfUI.font_default, 11, "THICKOUTLINE")
+        count:SetTextColor(1, 1, 1)
       end
-
       btn._pfSkinned = true
     end
 
-    local tex
-    if btn.bag and btn.slot then tex = select(1, GetContainerItemInfo(btn.bag, btn.slot)) end
-    local nt = btn:GetNormalTexture()
-    if not tex and nt and nt.GetTexture then tex = nt:GetTexture() end
-
-    if tex and nt then
-      -- apply the texture to the normal region and let pfUI's HandleIcon crop it
-      safeExec(function() nt:SetTexture(tex) end)
-      safeExec(function() pfUI.api.HandleIcon(btn, nt) end)
-      safeExec(function() nt:Hide() end)
-    elseif nt then
-      safeExec(function() nt:Hide() end)
-      safeExec(function() nt:SetTexture(nil) end)
+    local link = nil
+    local hasItem = false
+    if btn.bag and btn.slot then
+      link = GetContainerItemLink(btn.bag, btn.slot)
+      hasItem = GetContainerItemInfo(btn.bag, btn.slot) and true or false
     end
+
+    SetQualityBorder(btn, link, hasItem)
+    btn.locked = true
   end
 
   StripTextures(SendMailPackageButton, true)
@@ -98,6 +157,7 @@ HookAddonOrVariable("Postal", function()
   end
 
   SkinPostalAttachments()
+  SkinMailItemButtons()
 end)
 
 StripTextures(PostalSubjectEditBox, false, "BACKGROUND")
@@ -149,11 +209,16 @@ mailHook:SetScript("OnEvent", function()
     for _, r in ipairs({SendMailScrollChildFrame:GetRegions()}) do pcall(function() if r.SetFont then r:SetFont(MAIL_FONT, 12); r:SetTextColor(1,1,1) end end) end
   end)
 end)
-
 hooksecurefunc("SendMailFrame_Update", function()
   PostalHorizontalBarLeft:Hide()
   PostalHorizontalBarRight:Hide()
   SkinPostalAttachments()
+end)
+hooksecurefunc("InboxFrame_Update", function()
+  SkinMailItemButtons()
+end)
+hooksecurefunc("InboxFrame_OnClick", function(index)
+  UpdateOpenMailButton(index)
 end)
 
 if _G.Postal and _G.Postal.SendMailFrame_Update then
